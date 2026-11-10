@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  findByName, nameKey, newFriendId, normaliseName, sortedProfiles,
-  type FriendProfile,
+  findByName, nameKey, newFriendId, normaliseName, resolveFriendForName,
+  sortedProfiles, type FriendProfile,
 } from './friend.js';
 
 /**
@@ -60,6 +60,16 @@ describe('matching somebody to a profile they already have', () => {
     expect(findByName(profiles, 'Joris')).toBeNull();
     expect(findByName(profiles, '')).toBeNull();
     expect(findByName(profiles, '   ')).toBeNull();
+  });
+
+  it('reuses an existing profile instead of creating a fork', () => {
+    expect(resolveFriendForName(profiles, '  MILAN ')).toEqual({
+      kind: 'existing', profile: profiles[0],
+    });
+    expect(resolveFriendForName(profiles, 'Joris')).toEqual({
+      kind: 'new', displayName: 'Joris',
+    });
+    expect(resolveFriendForName(profiles, '   ')).toBeNull();
   });
 });
 

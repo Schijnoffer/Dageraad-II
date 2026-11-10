@@ -8,7 +8,7 @@ import type {
 } from '../engine/types.js';
 import type { DayStore } from '../orchestration/dayrunner.js';
 import type { NightCheckpoint, RoomStore } from '../orchestration/store.js';
-import { newFriendId, normaliseName, type FriendProfile } from './friend.js';
+import { findByName, newFriendId, normaliseName, type FriendProfile } from './friend.js';
 import type { HistoryRecord } from '../stats/alltime.js';
 import type { PublicNightView } from '../engine/publicview.js';
 import {
@@ -134,6 +134,7 @@ export class MemoryWorld {
         ? new Map([[uid, {
             uid, displayName: options.displayName,
             seatIndex: 0, playing: true, departed: false,
+            lastSeen: Date.now(),
           }]])
         : new Map(),
       privates: new Map(),
@@ -253,15 +254,17 @@ class MemoryBackend implements Backend {
       // top your score up off the bottom of the table.
       existing.displayName = displayName;
       existing.departed = false;
+      existing.lastSeen = Date.now();
       const member = r.view.members.find((m) => m.uid === this.uid);
       if (member) {
         member.leftAtRound = null;
         if (friend) {
           if (r.view.phase === 'lobby') {
-            this.reclaimFriendSeat(r, friend.friendId);
+            this.reclaimFriendSeat(r, friend);
           } else {
             assertFriendProfileAvailable(
-              r.view.members, r.view.seating, this.uid, friend.friendId,
+              r.view.members, r.view.seating, this.uid,
+              friend.friendId, friend.friendName,
             );
           }
           member.friendId = friend.friendId;
@@ -283,12 +286,15 @@ class MemoryBackend implements Backend {
     const nextRound = inLobby ? 1 : r.view.round + 1;
     const friendId = friend?.friendId ?? '';
     const friendName = friend?.friendName ?? displayName;
+    const claim = { friendId, friendName };
 
     if (inLobby) {
       // Same person, new phone: free the lobby seat the old device still holds.
-      this.reclaimFriendSeat(r, friendId);
+      this.reclaimFriendSeat(r, claim);
     } else {
-      assertFriendProfileAvailable(r.view.members, r.view.seating, this.uid, friendId);
+      assertFriendProfileAvailable(
+        r.view.members, r.view.seating, this.uid, friendId, friendName,
+      );
     }
 
     r.players.set(this.uid, {
@@ -297,6 +303,7 @@ class MemoryBackend implements Backend {
       seatIndex: null,
       playing: false,
       departed: false,
+      lastSeen: Date.now(),
     });
     r.view.members = [
       ...r.view.members,
@@ -319,7 +326,7 @@ class MemoryBackend implements Backend {
     if (r.view.phase !== 'lobby') throw new Error('profiles are frozen once the game starts');
     const member = r.view.members.find((entry) => entry.uid === this.uid);
     if (!member || member.leftAtRound !== null) throw new Error('active member only');
-    this.reclaimFriendSeat(r, friend.friendId);
+    this.reclaimFriendSeat(r, friend);
     member.friendId = friend.friendId;
     member.friendName = friend.friendName;
     this.world.notify(roomId);
@@ -332,9 +339,12 @@ class MemoryBackend implements Backend {
    * failure is a test phone still sitting at the table. Mid-round we refuse
    * instead — the deal already has that seat's card.
    */
-  private reclaimFriendSeat(r: RoomRecord, friendId: string): void {
+  private reclaimFriendSeat(
+    r: RoomRecord,
+    claim: { friendId: string; friendName?: string },
+  ): void {
     const occupied = occupiedFriendSeat(
-      r.view.members, r.view.seating, this.uid, friendId,
+      r.view.members, r.view.seating, this.uid, claim,
     );
     if (!occupied) return;
     const member = r.view.members.find((entry) => entry.uid === occupied.uid);
@@ -861,6 +871,8 @@ class MemoryBackend implements Backend {
   }
 
   async createFriend(displayName: string): Promise<FriendProfile> {
+    const existing = findByName(this.world.friends, displayName);
+    if (existing) return existing;
     const profile: FriendProfile = {
       id: newFriendId(this.world.random),
       displayName: normaliseName(displayName),
@@ -869,6 +881,14 @@ class MemoryBackend implements Backend {
     this.world.friends.push(profile);
     for (const cb of this.world.friendWatchers) cb([...this.world.friends]);
     return profile;
+  }
+
+  async touchPresence(roomId: string): Promise<void> {
+    const r = this.world.room(roomId);
+    const player = r.players.get(this.uid);
+    if (!player) return;
+    player.lastSeen = Date.now();
+    this.world.notify(roomId);
   }
 
   async recordRound(roomId: string, record: RoundRecord): Promise<void> {

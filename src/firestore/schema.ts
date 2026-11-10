@@ -170,6 +170,8 @@ export interface PlayerDoc {
   displayName: string;
   avatar: string | null;
   joinedAt: number;
+  /** Soft presence; updated while the tab is open. Optional for older docs. */
+  lastSeen?: number;
   /**
    * An AI player, added by the controlling browser to fill out a practice
    * table.

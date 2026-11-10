@@ -266,7 +266,7 @@ service cloud.firestore {
         allow create: if signedIn()
           && playerUid == uid()
           && request.resource.data.keys().hasOnly(
-               ['displayName', 'avatar', 'joinedAt']
+               ['displayName', 'avatar', 'joinedAt', 'lastSeen']
              );
 
         // ...or an AI player, added by the controlling browser to fill out a
@@ -290,7 +290,7 @@ service cloud.firestore {
         allow update: if signedIn()
           && (playerUid == uid() || isHost(roomId))
           && request.resource.data.keys().hasOnly(
-               ['displayName', 'avatar', 'joinedAt']
+               ['displayName', 'avatar', 'joinedAt', 'lastSeen']
              );
 
         // Going home is a member update, not a deletion: the rounds you played

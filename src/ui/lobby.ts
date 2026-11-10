@@ -20,9 +20,19 @@ export interface LobbyPlayer {
   uid: string;
   displayName: string;
   seatIndex: SeatIndex;
+  /** Soft presence; used to flag likely ghost seats from dead tabs. */
+  lastSeen?: number;
   /** An AI player. Labelled on the ring, because a seat that is not a person
    * has to be legible from across the table. */
   isBot?: boolean;
+}
+
+/** A seat with no heartbeat for this long is probably a closed test tab. */
+export const STALE_PRESENCE_MS = 90_000;
+
+export function isStalePresence(lastSeen: number | undefined, now = Date.now()): boolean {
+  if (lastSeen === undefined) return false;
+  return now - lastSeen > STALE_PRESENCE_MS;
 }
 
 export interface LobbyView {
@@ -146,7 +156,9 @@ function playerRoster(view: LobbyView, seated: LobbyPlayer[]): HTMLElement {
     row.className = 'rolerow';
     const name = document.createElement('span');
     name.className = 'rolerow__name';
-    name.textContent = player.displayName;
+    name.textContent = isStalePresence(player.lastSeen)
+      ? t(view.lang, 'lobby.stalePlayer', { name: player.displayName })
+      : player.displayName;
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'btn';

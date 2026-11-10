@@ -322,6 +322,31 @@ describe('starting a game', () => {
     expect(room.members.find((member) => member.uid === 'phone-a')?.leftAtRound).toBe(0);
   });
 
+  it('reclaims by display name when a typed name minted a forked friend id', async () => {
+    const world = new MemoryWorld(seededRandom(31));
+    const tablet = world.device('tablet');
+    const roomId = await tablet.createRoom({
+      displayName: 'Tafel', activeRoles: DEFAULT_ACTIVE_ROLES,
+      config: TWO_ROUND_CONFIG, playing: false,
+    });
+    const phoneA = world.device('phone-a');
+    const phoneB = world.device('phone-b');
+    await phoneA.joinRoom(roomId, 'Rieks', { friendId: 'f:old', friendName: 'Rieks' });
+    await phoneB.joinRoom(roomId, 'Rieks', { friendId: 'f:new', friendName: 'rieks' });
+
+    const room = await readRoomOnce(tablet, roomId);
+    expect(room.seating).toEqual(['phone-b']);
+    expect(room.members.find((member) => member.uid === 'phone-a')?.leftAtRound).toBe(0);
+  });
+
+  it('createFriend returns the existing profile for the same name', async () => {
+    const world = new MemoryWorld(seededRandom(32));
+    const device = world.device('phone');
+    const first = await device.createFriend('  Rieks ');
+    const second = await device.createFriend('rieks');
+    expect(second).toEqual(first);
+  });
+
   it('lets a lobby player become a guest without an all-time profile', async () => {
     const world = new MemoryWorld(seededRandom(20));
     const tablet = world.device('tablet');

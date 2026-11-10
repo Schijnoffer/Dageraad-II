@@ -152,6 +152,7 @@ function renderLobbyScreen(deps: AppDeps): HTMLElement {
     uid: p.uid,
     displayName: p.displayName,
     seatIndex: i as SeatIndex,
+    ...(p.lastSeen !== undefined ? { lastSeen: p.lastSeen } : {}),
     ...(p.isBot ? { isBot: true } : {}),
   }));
 

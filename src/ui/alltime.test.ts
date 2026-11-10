@@ -90,6 +90,25 @@ describe('picking who you are', () => {
     expect(created).toBe('Joris');
   });
 
+  it('reuses a previously used name instead of forking a second profile', () => {
+    let picked: FriendProfile | null = null;
+    let created = '';
+    const el = picker({
+      onPick: (profile) => { picked = profile; },
+      onCreate: (name) => { created = name; },
+    });
+    const field = el.querySelector<HTMLInputElement>('.join__name')!;
+    const create = el.querySelector<HTMLButtonElement>('.btn--primary')!;
+
+    field.value = '  milan ';
+    field.dispatchEvent(new Event('input'));
+    expect(create.textContent).toContain('Milan');
+    create.click();
+
+    expect(picked!.id).toBe('f:1');
+    expect(created).toBe('');
+  });
+
   it('trims the new name before creating it', () => {
     let created = '';
     const el = picker({ typed: '  Joris ', onCreate: (n) => { created = n; } });

@@ -1,5 +1,5 @@
 import { t, type Lang } from './i18n.js';
-import { sortedProfiles, type FriendProfile } from '../app/friend.js';
+import { findByName, sortedProfiles, type FriendProfile } from '../app/friend.js';
 import type { AllTimeStanding } from '../stats/alltime.js';
 import type { RoomMode } from '../app/backend.js';
 import type { ResolutionMode } from '../engine/types.js';
@@ -76,14 +76,26 @@ export function renderFriendPicker(view: FriendPickerView): HTMLElement {
   const create = document.createElement('button');
   create.type = 'button';
   create.className = 'btn btn--primary';
-  create.textContent = t(lang, 'friend.create');
-  create.disabled = view.busy === true || view.typed.trim().length === 0;
-  create.addEventListener('click', () => view.onCreate?.(field.value.trim()));
+  const syncCreate = () => {
+    const typed = field.value.trim();
+    const match = findByName(view.profiles, typed);
+    create.disabled = view.busy === true || typed.length === 0;
+    create.textContent = match
+      ? t(lang, 'friend.continueAs', { name: match.displayName })
+      : t(lang, 'friend.create');
+  };
+  syncCreate();
+  create.addEventListener('click', () => {
+    const typed = field.value.trim();
+    const match = findByName(view.profiles, typed);
+    if (match) view.onPick?.(match);
+    else view.onCreate?.(typed);
+  });
   // Replacing the whole app on every key loses focus after the first letter.
   // Keep this field and its button in sync locally instead.
   field.addEventListener('input', () => {
     view.onTyped?.(field.value);
-    create.disabled = view.busy === true || field.value.trim().length === 0;
+    syncCreate();
   });
   el.append(create);
 

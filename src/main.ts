@@ -12,7 +12,7 @@ import {
 } from './ui/alltime.js';
 import { allTimeStandings, type HistoryRecord } from './stats/alltime.js';
 import {
-  rememberFriendId, rememberedFriendId, type FriendProfile,
+  findByName, rememberFriendId, rememberedFriendId, type FriendProfile,
 } from './app/friend.js';
 import {
   renderDiscussionTimer, renderRoomSetup, renderResolutionPicker,
@@ -325,6 +325,7 @@ async function start(): Promise<void> {
     void maybeResumeReferee();
   });
   window.setInterval(refreshDiscussionTimer, 250);
+  window.setInterval(() => { void pulsePresence(); }, 20_000);
   document.addEventListener('visibilitychange', onRefereeVisibility);
 
   // The group, rather than one evening: both span every room, so both are
@@ -714,14 +715,30 @@ async function maybeResumeReferee(): Promise<void> {
 
   local.resumeAttemptedRound = room.round;
   local.refereeRunning = true;
+  // Checkpointed night windows are skipped inside runNight; say so before the
+  // long loop so a refresh does not look like a broken restart.
+  local.error = t(local.lang, 'referee.resuming');
   render();
   try {
     await runRefereeRound(state.roomId, room.round ^ 0x4f1bbcdc);
+    if (local.error === t(local.lang, 'referee.resuming')) local.error = null;
   } catch (err) {
     local.error = cleanError(err);
   } finally {
     local.refereeRunning = false;
     render();
+  }
+}
+
+async function pulsePresence(): Promise<void> {
+  const state = controller?.current();
+  if (!state?.roomId || document.visibilityState === 'hidden') return;
+  const member = state.room?.members.find((entry) => entry.uid === state.uid);
+  if (!member || member.leftAtRound !== null) return;
+  try {
+    await backend.touchPresence(state.roomId);
+  } catch {
+    // Presence is advisory; a denied write must not break the evening.
   }
 }
 
@@ -1783,7 +1800,10 @@ function friendPicker(onPicked?: () => void): HTMLElement {
     },
     onCreate: (displayName) => {
       void attempt(async () => {
-        const profile = await backend.createFriend(displayName);
+        // Typing a name that already exists must reuse that profile — a fresh
+        // friendId forks history and leaves the old lobby seat occupied.
+        const existing = findByName(local.friends, displayName);
+        const profile = existing ?? await backend.createFriend(displayName);
         local.friendTyped = '';
         await selectFriend(profile, onPicked);
       });
@@ -1809,7 +1829,7 @@ async function selectFriend(profile: FriendProfile, onPicked?: () => void): Prom
   // nothing: the list is shared, so picking the same name gets the SAME
   // profile — which is the whole difference from keying off the uid.
   rememberFriendId(profile.id);
-  if (!local.displayName) local.displayName = profile.displayName;
+  local.displayName = profile.displayName;
   onPicked?.();
 }
 

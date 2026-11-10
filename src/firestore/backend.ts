@@ -23,7 +23,9 @@ import {
 } from '../app/session.js';
 import { FirestoreRoomStore } from './roomstore.js';
 import { FirestoreSessionStore } from './sessionstore.js';
-import { newFriendId, normaliseName, type FriendProfile } from '../app/friend.js';
+import {
+  findByName, nameKey, newFriendId, normaliseName, type FriendProfile,
+} from '../app/friend.js';
 import {
   assertFriendProfileAvailable, assertUniqueFriendProfiles, occupiedFriendSeat,
 } from '../app/friendseat.js';
@@ -159,7 +161,10 @@ export class FirestoreBackend implements Backend {
   }
 
   private async writePlayer(roomId: string, displayName: string): Promise<void> {
-    const player: PlayerDoc = { displayName, avatar: null, joinedAt: Date.now() };
+    const now = Date.now();
+    const player: PlayerDoc = {
+      displayName, avatar: null, joinedAt: now, lastSeen: now,
+    };
     await setDoc(doc(this.db, paths.player(roomId, this.uid)), player);
   }
 
@@ -187,10 +192,12 @@ export class FirestoreBackend implements Backend {
     const members = await this.readMembers(roomId);
     const roomPeek = await this.room(roomId);
     const reclaim = roomPeek.phase === 'lobby'
-      ? occupiedFriendSeat(members, roomPeek.seating, this.uid, label.friendId)
+      ? occupiedFriendSeat(members, roomPeek.seating, this.uid, label)
       : null;
-    if (roomPeek.phase !== 'lobby' && label.friendId) {
-      assertFriendProfileAvailable(members, roomPeek.seating, this.uid, label.friendId);
+    if (roomPeek.phase !== 'lobby') {
+      assertFriendProfileAvailable(
+        members, roomPeek.seating, this.uid, label.friendId, label.friendName,
+      );
     }
 
     await runTransaction(this.db, async (tx) => {
@@ -210,13 +217,20 @@ export class FirestoreBackend implements Backend {
       let seating = [...room.seating];
       if (reclaim && reclaimSnap?.exists() && room.phase === 'lobby') {
         const data = reclaimSnap.data() as SessionMemberDoc;
-        if (data.leftAtRound == null && data.friendId === label.friendId) {
+        const sameId = !!label.friendId && data.friendId === label.friendId;
+        const sameName = !!label.friendName
+          && !!data.friendId
+          && nameKey(data.friendName ?? '') === nameKey(label.friendName);
+        if (data.leftAtRound == null && (sameId || sameName)) {
           tx.update(reclaimRef!, { leftAtRound: room.currentRound });
           seating = seating.filter((uid) => uid !== reclaim.uid);
         }
       }
 
-      const player: PlayerDoc = { displayName, avatar: null, joinedAt: Date.now() };
+      const now = Date.now();
+      const player: PlayerDoc = {
+        displayName, avatar: null, joinedAt: now, lastSeen: now,
+      };
       tx.set(playerRef, player);
       if (memberSnap.exists()) {
         const member = memberSnap.data() as SessionMemberDoc;
@@ -254,7 +268,7 @@ export class FirestoreBackend implements Backend {
     const own = members.find((member) => member.uid === this.uid);
     if (!own || own.leftAtRound !== null) throw new Error('active member only');
 
-    const reclaim = occupiedFriendSeat(members, room.seating, this.uid, friend.friendId);
+    const reclaim = occupiedFriendSeat(members, room.seating, this.uid, friend);
     if (reclaim) {
       await runTransaction(this.db, async (tx) => {
         const roomRef = this.roomRef(roomId);
@@ -266,7 +280,11 @@ export class FirestoreBackend implements Backend {
         if (live.phase !== 'lobby') throw new Error('profiles are frozen once the game starts');
         if (otherSnap.exists()) {
           const data = otherSnap.data() as SessionMemberDoc;
-          if (data.leftAtRound == null && data.friendId === friend.friendId) {
+          const sameId = !!friend.friendId && data.friendId === friend.friendId;
+          const sameName = !!friend.friendName
+            && !!data.friendId
+            && nameKey(data.friendName ?? '') === nameKey(friend.friendName);
+          if (data.leftAtRound == null && (sameId || sameName)) {
             tx.update(otherRef, { leftAtRound: live.currentRound });
             tx.update(roomRef, {
               seating: live.seating.filter((uid) => uid !== reclaim.uid),
@@ -544,6 +562,7 @@ export class FirestoreBackend implements Backend {
    */
   watchPlayers(roomId: string, cb: (players: PlayerView[]) => void): Unsubscribe {
     let names = new Map<string, string>();
+    let lastSeen = new Map<string, number>();
     let botUids = new Set<string>();
     let seating: string[] = [];
     let members: SessionMember[] = [];
@@ -556,12 +575,14 @@ export class FirestoreBackend implements Backend {
       );
       const out: PlayerView[] = [...names].map(([uid, displayName]) => {
         const seat = seating.indexOf(uid);
+        const seen = lastSeen.get(uid);
         return {
           uid,
           displayName,
           seatIndex: seat < 0 ? null : (seat as SeatIndex),
           playing: seat >= 0,
           departed: departed.has(uid),
+          ...(seen !== undefined ? { lastSeen: seen } : {}),
           ...(botUids.has(uid) ? { isBot: true } : {}),
         };
       });
@@ -580,6 +601,12 @@ export class FirestoreBackend implements Backend {
         havePlayers = true;
         names = new Map(
           snap.docs.map((d) => [d.id, (d.data() as PlayerDoc).displayName ?? d.id]),
+        );
+        lastSeen = new Map(
+          snap.docs.flatMap((d) => {
+            const value = (d.data() as PlayerDoc).lastSeen;
+            return typeof value === 'number' ? [[d.id, value] as const] : [];
+          }),
         );
         botUids = new Set(
           snap.docs.filter((d) => (d.data() as PlayerDoc).isBot === true)
@@ -1147,6 +1174,19 @@ export class FirestoreBackend implements Backend {
   }
 
   async createFriend(displayName: string): Promise<FriendProfile> {
+    const snap = await getDocs(collection(this.db, paths.friends()));
+    const existing = findByName(
+      snap.docs.map((entry) => {
+        const data = entry.data() as FriendDoc;
+        return {
+          id: data.id ?? entry.id,
+          displayName: data.displayName ?? '',
+          createdAt: data.createdAt ?? 0,
+        };
+      }),
+      displayName,
+    );
+    if (existing) return existing;
     const profile: FriendProfile = {
       id: newFriendId(),
       displayName: normaliseName(displayName),
@@ -1154,6 +1194,14 @@ export class FirestoreBackend implements Backend {
     };
     await setDoc(doc(this.db, paths.friend(profile.id)), profile);
     return profile;
+  }
+
+  /** Soft presence so lobby spoken from dead tabs are visible. */
+  async touchPresence(roomId: string): Promise<void> {
+    const ref = doc(this.db, paths.player(roomId, this.uid));
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    await updateDoc(ref, { lastSeen: Date.now() });
   }
 }
 

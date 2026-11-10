@@ -1,3 +1,4 @@
+import { nameKey } from './friend.js';
 import type { SessionMember } from './session.js';
 
 /**
@@ -8,6 +9,9 @@ import type { SessionMember } from './session.js';
  * device and now I am here" — not two people who both want to be Milan. The
  * join path reclaims the old seat rather than leaving a silent duplicate that
  * only fails when somebody tries to deal.
+ *
+ * Matching is by friendId first, then by normalised friendName: typing the
+ * same name used to mint a fresh friendId and leave the old seat in place.
  */
 
 export interface OccupiedFriendSeat {
@@ -16,24 +20,49 @@ export interface OccupiedFriendSeat {
   friendName?: string;
 }
 
-/** Active seated member holding `friendId`, if any, excluding `ownUid`. */
+export interface FriendSeatClaim {
+  friendId: string;
+  friendName?: string;
+}
+
+/** Active seated member holding this friend label, if any, excluding `ownUid`. */
 export function occupiedFriendSeat(
   members: SessionMember[],
   seating: string[],
   ownUid: string,
-  friendId: string,
+  claim: FriendSeatClaim | string,
 ): OccupiedFriendSeat | null {
-  if (!friendId) return null;
+  const friendId = typeof claim === 'string' ? claim : claim.friendId;
+  const friendName = typeof claim === 'string' ? undefined : claim.friendName;
+  if (!friendId && !friendName) return null;
   const seated = new Set(seating);
-  const hit = members.find((member) => member.uid !== ownUid
+
+  if (friendId) {
+    const byId = members.find((member) => member.uid !== ownUid
+      && seated.has(member.uid)
+      && member.leftAtRound === null
+      && member.friendId === friendId);
+    if (byId?.friendId) {
+      return {
+        uid: byId.uid,
+        friendId: byId.friendId,
+        ...(byId.friendName ? { friendName: byId.friendName } : {}),
+      };
+    }
+  }
+
+  const key = nameKey(friendName ?? '');
+  if (!key) return null;
+  const byName = members.find((member) => member.uid !== ownUid
     && seated.has(member.uid)
     && member.leftAtRound === null
-    && member.friendId === friendId);
-  if (!hit || !hit.friendId) return null;
+    && !!member.friendId
+    && nameKey(member.friendName ?? '') === key);
+  if (!byName?.friendId) return null;
   return {
-    uid: hit.uid,
-    friendId: hit.friendId,
-    ...(hit.friendName ? { friendName: hit.friendName } : {}),
+    uid: byName.uid,
+    friendId: byName.friendId,
+    ...(byName.friendName ? { friendName: byName.friendName } : {}),
   };
 }
 
@@ -42,13 +71,20 @@ export function assertUniqueFriendProfiles(
   seating: string[],
 ): void {
   const byUid = new Map(members.map((member) => [member.uid, member]));
-  const seen = new Map<string, SessionMember>();
+  const seenIds = new Map<string, SessionMember>();
+  const seenNames = new Map<string, SessionMember>();
   for (const uid of seating) {
     const member = byUid.get(uid);
-    const friendId = member?.friendId;
-    if (!friendId) continue;
-    if (seen.has(friendId)) throw duplicateFriendProfileError(member?.friendName);
-    seen.set(friendId, member!);
+    if (!member?.friendId) continue;
+    if (seenIds.has(member.friendId)) {
+      throw duplicateFriendProfileError(member.friendName);
+    }
+    seenIds.set(member.friendId, member);
+    const key = nameKey(member.friendName ?? '');
+    if (key) {
+      if (seenNames.has(key)) throw duplicateFriendProfileError(member.friendName);
+      seenNames.set(key, member);
+    }
   }
 }
 
@@ -57,8 +93,9 @@ export function assertFriendProfileAvailable(
   seating: string[],
   ownUid: string,
   friendId: string,
+  friendName?: string,
 ): void {
-  const occupied = occupiedFriendSeat(members, seating, ownUid, friendId);
+  const occupied = occupiedFriendSeat(members, seating, ownUid, { friendId, friendName });
   if (occupied) throw duplicateFriendProfileError(occupied.friendName);
 }
 
