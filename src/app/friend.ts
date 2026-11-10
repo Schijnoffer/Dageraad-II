@@ -69,6 +69,24 @@ export function findByName(
   return profiles.find((p) => nameKey(p.displayName) === key) ?? null;
 }
 
+/**
+ * Prefer an existing profile over creating a fork.
+ *
+ * Typing "Rieks" again after testing must return the SAME friendId. A second
+ * id with the same display name silently splits all-time history and also
+ * bypasses lobby seat reclaim (which keys off friendId).
+ */
+export function resolveFriendForName(
+  profiles: FriendProfile[],
+  name: string,
+): { kind: 'existing'; profile: FriendProfile } | { kind: 'new'; displayName: string } | null {
+  const displayName = normaliseName(name);
+  if (!displayName) return null;
+  const existing = findByName(profiles, displayName);
+  if (existing) return { kind: 'existing', profile: existing };
+  return { kind: 'new', displayName };
+}
+
 /** Profiles for a picker: alphabetical, so the same name is in the same place. */
 export function sortedProfiles(profiles: FriendProfile[]): FriendProfile[] {
   return [...profiles].sort((a, b) =>

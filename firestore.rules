@@ -103,8 +103,9 @@ service cloud.firestore {
         && request.resource.data.abstain == false;
     }
     // Lobby members may arrange the physical table before the game starts.
-    // They may reorder existing seats, or add only their own UID as one new
-    // seat; they cannot remove, replace, or duplicate anybody already seated.
+    // They may reorder, add only their own UID, clear a ghost seat, or reclaim
+    // a seat held by another device under the same friend profile (trusted
+    // group: friendIds are labels, not passwords).
     function memberArrangesLobbySeating(roomId) {
       return inPhase(roomId, 'lobby')
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -130,11 +131,22 @@ service cloud.firestore {
                .hasAll(resource.data.seating.toSet())
             && request.resource.data.seating.toSet().hasAll([uid()])
             && !resource.data.seating.toSet().hasAny([uid()]))
+          // Clear one ghost seat (any uid) so a second phone can sit down.
           || (request.resource.data.seating.size() == resource.data.seating.size() - 1
             && resource.data.seating.toSet()
                .hasAll(request.resource.data.seating.toSet())
-            && resource.data.seating.toSet().hasAny([uid()])
-            && !request.resource.data.seating.toSet().hasAny([uid()]))
+            && request.resource.data.seating.toSet().size()
+               == request.resource.data.seating.size())
+          // Reclaim: replace one other seated uid with self, same table size.
+          || (getAfter(/databases/$(database)/documents/rooms/$(roomId)/members/$(uid()))
+               .data.leftAtRound == null
+            && request.resource.data.seating.size() == resource.data.seating.size()
+            && request.resource.data.seating.toSet().size()
+               == request.resource.data.seating.size()
+            && request.resource.data.seating.toSet().hasAll([uid()])
+            && !resource.data.seating.toSet().hasAny([uid()])
+            && request.resource.data.seating.hasOnly(
+                 resource.data.seating.concat([uid()])))
         );
     }
     // Emergency recovery is a deliberate, trusted-group action. Firestore
@@ -254,7 +266,7 @@ service cloud.firestore {
         allow create: if signedIn()
           && playerUid == uid()
           && request.resource.data.keys().hasOnly(
-               ['displayName', 'avatar', 'joinedAt']
+               ['displayName', 'avatar', 'joinedAt', 'lastSeen']
              );
 
         // ...or an AI player, added by the controlling browser to fill out a
@@ -278,7 +290,7 @@ service cloud.firestore {
         allow update: if signedIn()
           && (playerUid == uid() || isHost(roomId))
           && request.resource.data.keys().hasOnly(
-               ['displayName', 'avatar', 'joinedAt']
+               ['displayName', 'avatar', 'joinedAt', 'lastSeen']
              );
 
         // Going home is a member update, not a deletion: the rounds you played
@@ -532,8 +544,18 @@ service cloud.firestore {
         // once, and never a round already in the past. Backdating a departure
         // would erase rounds you actually played, and `joinedAtRound` must
         // never move at all — it is the seed.
+        //
+        // In the lobby, any signed-in device may mark somebody left: that is
+        // how a second phone reclaims a test seat, and how Spelers beheren
+        // clears ghosts without being the host. Mid-round only the owner,
+        // host or referee may — the deal already includes that seat.
         allow update: if signedIn()
-          && (memberUid == uid() || isHost(roomId) || isReferee(roomId))
+          && (
+               memberUid == uid()
+               || isHost(roomId)
+               || isReferee(roomId)
+               || inPhase(roomId, 'lobby')
+             )
           && request.resource.data.keys().hasOnly(
                ['uid', 'joinedAtRound', 'leftAtRound', 'friendId', 'friendName']
              )

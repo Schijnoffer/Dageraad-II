@@ -274,4 +274,47 @@ describe('FirestoreBackend through the real emulators', () => {
       uid: referee.uid, joinedAtRound: 1, leftAtRound: null,
     })).rejects.toMatchObject({ code: 'permission-denied' });
   });
+
+  it('reclaims a lobby seat when a second phone joins with the same friend profile', async () => {
+    const tablet = await client('reclaim-tablet');
+    const roomId = await tablet.backend.createRoom(roomOptions(false, 'tablet'));
+    const phoneA = await client('reclaim-a');
+    const phoneB = await client('reclaim-b');
+    const friend = { friendId: 'friend-rieks', friendName: 'Rieks' };
+
+    await phoneA.backend.joinRoom(roomId, 'Rieks', friend);
+    await phoneB.backend.joinRoom(roomId, 'Rieks', friend);
+
+    const room = await readRoom(tablet.db, roomId);
+    expect(room.seating).toEqual([phoneB.uid]);
+    expect((await getDoc(doc(tablet.db, paths.member(roomId, phoneA.uid)))).data())
+      .toMatchObject({ friendId: 'friend-rieks', leftAtRound: 0 });
+    expect((await getDoc(doc(tablet.db, paths.member(roomId, phoneB.uid)))).data())
+      .toMatchObject({ friendId: 'friend-rieks', leftAtRound: null });
+  });
+
+  it('reclaims by display name when a previously used name minted a forked friend id', async () => {
+    const tablet = await client('reclaim-name-tablet');
+    const roomId = await tablet.backend.createRoom(roomOptions(false, 'tablet'));
+    const phoneA = await client('reclaim-name-a');
+    const phoneB = await client('reclaim-name-b');
+
+    await phoneA.backend.joinRoom(roomId, 'Rieks', {
+      friendId: 'friend-old', friendName: 'Rieks',
+    });
+    await phoneB.backend.joinRoom(roomId, 'Rieks', {
+      friendId: 'friend-new', friendName: 'rieks',
+    });
+
+    expect(await readRoom(tablet.db, roomId)).toMatchObject({ seating: [phoneB.uid] });
+    expect((await getDoc(doc(tablet.db, paths.member(roomId, phoneA.uid)))).data())
+      .toMatchObject({ leftAtRound: 0 });
+  });
+
+  it('createFriend reuses an existing profile for the same name', async () => {
+    const phone = await client('friend-dedupe');
+    const first = await phone.backend.createFriend('  Rieks ');
+    const second = await phone.backend.createFriend('rieks');
+    expect(second).toEqual(first);
+  });
 });

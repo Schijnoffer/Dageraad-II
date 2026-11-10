@@ -120,6 +120,8 @@ export type RoomPhase = 'lobby' | 'night' | 'day' | 'voting' | 'results';
 export interface PlayerView {
   uid: string;
   displayName: string;
+  /** Soft presence heartbeat; missing on older documents. */
+  lastSeen?: number;
   /** An AI player. Labelled as such everywhere a person can see a name. */
   isBot?: boolean;
   /**
@@ -434,7 +436,15 @@ export interface Backend {
 
   /** The shared address book. Chosen from when joining; created once. */
   watchFriends(cb: (friends: FriendProfile[]) => void): Unsubscribe;
+  /**
+   * Create a friend profile, or return the existing one with the same name.
+   * Names match case- and whitespace-insensitively so typing "Rieks" again
+   * does not fork history or bypass lobby seat reclaim.
+   */
   createFriend(displayName: string): Promise<FriendProfile>;
+
+  /** Soft presence heartbeat while this device is in a room. */
+  touchPresence(roomId: string): Promise<void>;
 
   /** Host: pause/resume for an absent player. Public and manual (§5.3). */
   setPaused(roomId: string, paused: boolean): Promise<void>;

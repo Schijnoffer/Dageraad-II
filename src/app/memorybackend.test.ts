@@ -239,7 +239,7 @@ describe('starting a game', () => {
     });
   });
 
-  it('refuses two seated devices claiming the same friend profile', async () => {
+  it('reclaims a lobby seat when a second phone joins with the same friend profile', async () => {
     const world = new MemoryWorld(seededRandom(17));
     const tablet = world.device('tablet');
     const roomId = await tablet.createRoom({
@@ -247,10 +247,17 @@ describe('starting a game', () => {
       config: TWO_ROUND_CONFIG, playing: false,
     });
     const friend = { friendId: 'friend-milan', friendName: 'Milan' };
-    await world.device('phone-a').joinRoom(roomId, 'Milan', friend);
-    await world.device('phone-b').joinRoom(roomId, 'Milan reserve', friend);
+    const phoneA = world.device('phone-a');
+    const phoneB = world.device('phone-b');
+    await phoneA.joinRoom(roomId, 'Milan', friend);
+    await phoneB.joinRoom(roomId, 'Milan', friend);
 
-    await expect(tablet.startGame(roomId, 1)).rejects.toThrow(/wordt al gebruikt/);
+    const room = await readRoomOnce(tablet, roomId);
+    expect(room.seating).toEqual(['phone-b']);
+    expect(room.members.find((member) => member.uid === 'phone-a')?.leftAtRound).toBe(0);
+    expect(room.members.find((member) => member.uid === 'phone-b')).toMatchObject({
+      friendId: 'friend-milan', leftAtRound: null,
+    });
   });
 
   it('lets a player repair a duplicate profile from the lobby', async () => {
@@ -264,7 +271,7 @@ describe('starting a game', () => {
     const a = world.device('phone-a');
     const b = world.device('phone-b');
     await a.joinRoom(roomId, 'Paul', shared);
-    await b.joinRoom(roomId, 'Ivo', shared);
+    await b.joinRoom(roomId, 'Ivo', { friendId: 'friend-ivo', friendName: 'Ivo' });
 
     await expect(b.setFriendProfile(roomId, {
       friendId: 'friend-ivo', friendName: 'Ivo',
@@ -275,7 +282,7 @@ describe('starting a game', () => {
     });
   });
 
-  it('refuses choosing a profile already used by another seated player', async () => {
+  it('reclaims a profile when chosen in the lobby by another phone', async () => {
     const world = new MemoryWorld(seededRandom(19));
     const tablet = world.device('tablet');
     const roomId = await tablet.createRoom({
@@ -289,7 +296,55 @@ describe('starting a game', () => {
 
     await expect(b.setFriendProfile(roomId, {
       friendId: 'friend-paul', friendName: 'Paul',
-    })).rejects.toThrow(/Paul.*wordt al gebruikt.*Eenmalig spelen/);
+    })).resolves.toBeUndefined();
+    const room = await readRoomOnce(b, roomId);
+    expect(room.seating).toEqual(['phone-b']);
+    expect(room.members.find((member) => member.uid === 'phone-a')?.leftAtRound).toBe(0);
+    expect(room.members.find((member) => member.uid === 'phone-b')).toMatchObject({
+      friendId: 'friend-paul', friendName: 'Paul',
+    });
+  });
+
+  it('lets any lobby member clear a ghost seat', async () => {
+    const world = new MemoryWorld(seededRandom(29));
+    const tablet = world.device('tablet');
+    const roomId = await tablet.createRoom({
+      displayName: 'Tafel', activeRoles: DEFAULT_ACTIVE_ROLES,
+      config: TWO_ROUND_CONFIG, playing: false,
+    });
+    const a = world.device('phone-a');
+    const b = world.device('phone-b');
+    await a.joinRoom(roomId, 'Paul');
+    await b.joinRoom(roomId, 'Ivo');
+    await b.removePlayer(roomId, a.uid);
+    const room = await readRoomOnce(b, roomId);
+    expect(room.seating).toEqual(['phone-b']);
+    expect(room.members.find((member) => member.uid === 'phone-a')?.leftAtRound).toBe(0);
+  });
+
+  it('reclaims by display name when a typed name minted a forked friend id', async () => {
+    const world = new MemoryWorld(seededRandom(31));
+    const tablet = world.device('tablet');
+    const roomId = await tablet.createRoom({
+      displayName: 'Tafel', activeRoles: DEFAULT_ACTIVE_ROLES,
+      config: TWO_ROUND_CONFIG, playing: false,
+    });
+    const phoneA = world.device('phone-a');
+    const phoneB = world.device('phone-b');
+    await phoneA.joinRoom(roomId, 'Rieks', { friendId: 'f:old', friendName: 'Rieks' });
+    await phoneB.joinRoom(roomId, 'Rieks', { friendId: 'f:new', friendName: 'rieks' });
+
+    const room = await readRoomOnce(tablet, roomId);
+    expect(room.seating).toEqual(['phone-b']);
+    expect(room.members.find((member) => member.uid === 'phone-a')?.leftAtRound).toBe(0);
+  });
+
+  it('createFriend returns the existing profile for the same name', async () => {
+    const world = new MemoryWorld(seededRandom(32));
+    const device = world.device('phone');
+    const first = await device.createFriend('  Rieks ');
+    const second = await device.createFriend('rieks');
+    expect(second).toEqual(first);
   });
 
   it('lets a lobby player become a guest without an all-time profile', async () => {
