@@ -21,6 +21,9 @@ import {
   seatingForNextRound, standings,
   type RoundRecord, type SessionMember,
 } from './session.js';
+import {
+  assertFriendProfileAvailable, assertUniqueFriendProfiles, occupiedFriendSeat,
+} from './friendseat.js';
 
 /** Names for AI players. Recognisably not people, and short enough to fit. */
 const BOT_NAMES = [
@@ -251,7 +254,20 @@ class MemoryBackend implements Backend {
       existing.displayName = displayName;
       existing.departed = false;
       const member = r.view.members.find((m) => m.uid === this.uid);
-      if (member) member.leftAtRound = null;
+      if (member) {
+        member.leftAtRound = null;
+        if (friend) {
+          if (r.view.phase === 'lobby') {
+            this.reclaimFriendSeat(r, friend.friendId);
+          } else {
+            assertFriendProfileAvailable(
+              r.view.members, r.view.seating, this.uid, friend.friendId,
+            );
+          }
+          member.friendId = friend.friendId;
+          member.friendName = friend.friendName;
+        }
+      }
       this.world.notify(roomId);
       return;
     }
@@ -265,6 +281,15 @@ class MemoryBackend implements Backend {
     // one — which is what stops a joining device dictating its own score.
     const inLobby = r.view.phase === 'lobby';
     const nextRound = inLobby ? 1 : r.view.round + 1;
+    const friendId = friend?.friendId ?? '';
+    const friendName = friend?.friendName ?? displayName;
+
+    if (inLobby) {
+      // Same person, new phone: free the lobby seat the old device still holds.
+      this.reclaimFriendSeat(r, friendId);
+    } else {
+      assertFriendProfileAvailable(r.view.members, r.view.seating, this.uid, friendId);
+    }
 
     r.players.set(this.uid, {
       uid: this.uid,
@@ -277,8 +302,8 @@ class MemoryBackend implements Backend {
       ...r.view.members,
       {
         uid: this.uid, joinedAtRound: nextRound, leftAtRound: null,
-        friendId: friend?.friendId ?? '',
-        friendName: friend?.friendName ?? displayName,
+        friendId,
+        friendName,
       },
     ];
 
@@ -294,10 +319,29 @@ class MemoryBackend implements Backend {
     if (r.view.phase !== 'lobby') throw new Error('profiles are frozen once the game starts');
     const member = r.view.members.find((entry) => entry.uid === this.uid);
     if (!member || member.leftAtRound !== null) throw new Error('active member only');
-    assertFriendProfileAvailable(r.view.members, r.view.seating, this.uid, friend.friendId);
+    this.reclaimFriendSeat(r, friend.friendId);
     member.friendId = friend.friendId;
     member.friendName = friend.friendName;
     this.world.notify(roomId);
+  }
+
+  /**
+   * Free a lobby seat held by another device under the same friend label.
+   *
+   * Trusted-group behaviour: a friendId is not a password, and the common
+   * failure is a test phone still sitting at the table. Mid-round we refuse
+   * instead — the deal already has that seat's card.
+   */
+  private reclaimFriendSeat(r: RoomRecord, friendId: string): void {
+    const occupied = occupiedFriendSeat(
+      r.view.members, r.view.seating, this.uid, friendId,
+    );
+    if (!occupied) return;
+    const member = r.view.members.find((entry) => entry.uid === occupied.uid);
+    if (member) member.leftAtRound = Math.max(0, r.view.round);
+    const player = r.players.get(occupied.uid);
+    if (player) player.departed = true;
+    r.view.seating = r.view.seating.filter((uid) => uid !== occupied.uid);
   }
 
   async leaveRoom(roomId: string): Promise<void> {
@@ -613,7 +657,17 @@ class MemoryBackend implements Backend {
 
   async removePlayer(roomId: string, playerUid: string): Promise<void> {
     const r = this.world.room(roomId);
-    this.requireHostOrReferee(r);
+    // Lobby: any active member may clear a ghost seat (another phone still
+    // listed after testing). Mid-round only host/referee — the deal is fixed.
+    if (r.view.phase === 'lobby') {
+      const self = r.view.members.find((entry) => entry.uid === this.uid);
+      const privileged = r.view.hostUid === this.uid || r.view.refereeUid === this.uid;
+      if (!privileged && (!self || self.leftAtRound !== null)) {
+        throw new Error('active member, host, or referee only');
+      }
+    } else {
+      this.requireHostOrReferee(r);
+    }
     const player = r.players.get(playerUid);
     const member = r.view.members.find((entry) => entry.uid === playerUid);
     if (!player || !member) throw new Error('player not found');
@@ -1012,40 +1066,11 @@ class MemoryRefereeStore implements RoomStore, DayStore {
 
 }
 
-function assertUniqueFriendProfiles(members: SessionMember[], seating: string[]): void {
-  const byUid = new Map(members.map((member) => [member.uid, member]));
-  const seen = new Map<string, SessionMember>();
-  for (const uid of seating) {
-    const member = byUid.get(uid);
-    const friendId = member?.friendId;
-    if (!friendId) continue;
-    if (seen.has(friendId)) throw duplicateFriendProfileError(member?.friendName);
-    seen.set(friendId, member!);
-  }
-}
-
-function assertFriendProfileAvailable(
-  members: SessionMember[], seating: string[], ownUid: string, friendId: string,
-): void {
-  // Empty means "guest for tonight": it deliberately carries no all-time
-  // identity and therefore cannot collide with another guest.
-  if (!friendId) return;
-  const seated = new Set(seating);
-  const duplicate = members.find((member) => member.uid !== ownUid
-    && seated.has(member.uid) && member.leftAtRound === null && member.friendId === friendId);
-  if (duplicate) throw duplicateFriendProfileError(duplicate.friendName);
-}
-
 function assertExactRoleCount(roles: RoleId[], seatCount: number): void {
   const needed = seatCount + 3;
   if (roles.length !== needed) {
     throw new Error(`${seatCount} spelers hebben precies ${needed} kaarten nodig; er zijn er ${roles.length}.`);
   }
-}
-
-function duplicateFriendProfileError(name?: string): Error {
-  const profile = name ? ` \u201c${name}\u201d` : '';
-  return new Error(`Profiel${profile} wordt al gebruikt op een ander apparaat in deze kamer. Verwijder onder Spelers beheren het oude apparaat, of kies via Menu > Profielen voor Eenmalig spelen (geen statistieken).`);
 }
 
 export { MemoryRefereeStore };

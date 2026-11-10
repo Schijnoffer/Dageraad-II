@@ -159,6 +159,12 @@ const nl: Dict = {
   'menu.copied': 'Gekopieerd',
   'menu.home': 'Naar beginscherm',
   'home.returnToRoom': 'Terug naar tafel {code}',
+  'home.returnToRoomNote':
+    'Op een nieuwe telefoon moet je daarna nog op Meedoen drukken en je naam kiezen. Alleen de link openen is niet genoeg.',
+  'demo.banner':
+    'Demomodus (?demo): alles speelt in deze ene tab. Andere telefoons kunnen hier niet bij. Haal ?demo uit de link voor echt samen spelen.',
+  'referee.background':
+    'Dit apparaat leidt het spel en staat op de achtergrond of in slaap. Houd deze tab open en wakker — anders blijft de nacht voor iedereen stilstaan.',
   'menu.leave': 'Weggaan',
   'menu.recover': 'Spelleiding overnemen',
 
@@ -287,7 +293,10 @@ const nl: Dict = {
   'friend.continueAs': 'Ga door als {name}',
   'friend.profiles': 'Profielen',
   'friend.guest': 'Eenmalig spelen (geen statistieken)',
-  'friend.guestExplain': 'Voor bezoek of als een oud apparaat je profiel nog bezet houdt. Je speelt volledig mee; dit potje komt niet bij een persoonlijk profiel.',
+  'friend.guestExplain':
+    'Voor bezoek, of als je dit potje niet in de eeuwige stand wilt. Joinen met '
+    + 'je eigen profiel op een nieuwe telefoon neemt automatisch de oude '
+    + 'lobby-stoel over. Eenmalig spelen telt niet mee voor statistieken.',
 
   'alltime.title': 'Eeuwige stand',
   'alltime.empty': 'Nog geen enkele avond die meetelt.',
@@ -437,6 +446,12 @@ const en: Dict = {
   'menu.copied': 'Copied',
   'menu.home': 'Home',
   'home.returnToRoom': 'Return to table {code}',
+  'home.returnToRoomNote':
+    'On a new phone you still need to tap Join and pick your name. Opening the link alone is not enough.',
+  'demo.banner':
+    'Demo mode (?demo): everything runs in this one tab. Other phones cannot join. Remove ?demo from the URL for real multiplayer.',
+  'referee.background':
+    'This device is running the game and is in the background or asleep. Keep this tab open and awake — otherwise the night stalls for everyone.',
   'menu.leave': 'Leave',
   'menu.recover': 'Take over running the game',
 
@@ -557,7 +572,10 @@ const en: Dict = {
   'friend.continueAs': 'Continue as {name}',
   'friend.profiles': 'Profiles',
   'friend.guest': 'Play once (no statistics)',
-  'friend.guestExplain': 'For visitors or when an old device still occupies your profile. You play normally; this game is not added to a personal profile.',
+  'friend.guestExplain':
+    'For visitors, or when you do not want this game in the all-time table. '
+    + 'Joining with your own profile on a new phone automatically takes over '
+    + 'the old lobby seat. Guest play does not count toward statistics.',
 
   'alltime.title': 'All-time',
   'alltime.empty': 'No evening has counted yet.',

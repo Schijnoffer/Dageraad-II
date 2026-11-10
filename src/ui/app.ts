@@ -172,8 +172,13 @@ function renderLobbyScreen(deps: AppDeps): HTMLElement {
     canManageBots: mayManageBots(room, deps.state.uid),
     ...(deps.actions.onAddBot ? { onAddBot: deps.actions.onAddBot } : {}),
     ...(deps.actions.onRemoveBot ? { onRemoveBot: deps.actions.onRemoveBot } : {}),
+    // Any active lobby member may clear a ghost seat (another phone left over
+    // from testing). Mid-round removals stay host/referee-only in the backend.
     canManagePlayers: room.phase === 'lobby'
-      && (room.hostUid === deps.state.uid || room.refereeUid === deps.state.uid),
+      && (room.hostUid === deps.state.uid
+        || room.refereeUid === deps.state.uid
+        || room.members.some((member) => member.uid === deps.state.uid
+          && member.leftAtRound === null)),
     ...(deps.actions.onRemovePlayer ? { onRemovePlayer: deps.actions.onRemovePlayer } : {}),
     activeRoles: room.activeRoles,
     canManageRoles: deps.busy !== true && room.phase === 'lobby'

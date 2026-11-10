@@ -103,7 +103,7 @@ describe('picking who you are', () => {
     el.querySelector<HTMLButtonElement>('.friends__guest')!.click();
     expect(guest).toBe(true);
     expect(el.textContent).toContain('Eenmalig spelen (geen statistieken)');
-    expect(el.textContent).toContain('oud apparaat');
+    expect(el.textContent).toContain('nieuwe telefoon');
   });
 
   it('explains why it is asking, so it does not read as a signup', () => {

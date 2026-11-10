@@ -274,4 +274,22 @@ describe('FirestoreBackend through the real emulators', () => {
       uid: referee.uid, joinedAtRound: 1, leftAtRound: null,
     })).rejects.toMatchObject({ code: 'permission-denied' });
   });
+
+  it('reclaims a lobby seat when a second phone joins with the same friend profile', async () => {
+    const tablet = await client('reclaim-tablet');
+    const roomId = await tablet.backend.createRoom(roomOptions(false, 'tablet'));
+    const phoneA = await client('reclaim-a');
+    const phoneB = await client('reclaim-b');
+    const friend = { friendId: 'friend-rieks', friendName: 'Rieks' };
+
+    await phoneA.backend.joinRoom(roomId, 'Rieks', friend);
+    await phoneB.backend.joinRoom(roomId, 'Rieks', friend);
+
+    const room = await readRoom(tablet.db, roomId);
+    expect(room.seating).toEqual([phoneB.uid]);
+    expect((await getDoc(doc(tablet.db, paths.member(roomId, phoneA.uid)))).data())
+      .toMatchObject({ friendId: 'friend-rieks', leftAtRound: 0 });
+    expect((await getDoc(doc(tablet.db, paths.member(roomId, phoneB.uid)))).data())
+      .toMatchObject({ friendId: 'friend-rieks', leftAtRound: null });
+  });
 });

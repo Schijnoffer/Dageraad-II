@@ -90,6 +90,8 @@ interface Local {
   privateInfoRound: number | null;
   /** True once this device has run the round it is refereeing. */
   refereeRunning: boolean;
+  /** Referee tab is in the background — night/day will stall. */
+  refereeBackground: boolean;
   /** Prevent a failed recovery from retrying on every live snapshot. */
   resumeAttemptedRound: number | null;
   /** Which human this device is, across evenings. Null until picked. */
@@ -143,6 +145,7 @@ const local: Local = {
   acknowledgedPrivateInfo: 0,
   privateInfoRound: null,
   refereeRunning: false,
+  refereeBackground: false,
   resumeAttemptedRound: null,
   friend: null,
   identityKind: 'unselected',
@@ -272,6 +275,24 @@ function firebaseFailure(error: unknown): string {
     : String(error);
 }
 
+/** Strip the `Error:` prefix browsers put on thrown messages. */
+function cleanError(error: unknown): string {
+  return firebaseFailure(error).replace(/^Error:\s*/i, '');
+}
+
+/**
+ * Join failures used to all become "kamer bestaat niet", which hid the real
+ * cause on a second phone (permission denied, referee seat, network, …).
+ */
+function joinFailureMessage(error: unknown): string {
+  const mapped = firebaseFailure(error);
+  if (mapped !== String(error)) return mapped;
+  const raw = cleanError(error);
+  if (/no room/i.test(raw)) return t(local.lang, 'join.noSuchRoom');
+  if (/referee is not a player/i.test(raw)) return t(local.lang, 'join.refereeCannotPlay');
+  return raw;
+}
+
 function reportListenerError(error: unknown): void {
   local.error = firebaseFailure(error);
   render();
@@ -304,6 +325,7 @@ async function start(): Promise<void> {
     void maybeResumeReferee();
   });
   window.setInterval(refreshDiscussionTimer, 250);
+  document.addEventListener('visibilitychange', onRefereeVisibility);
 
   // The group, rather than one evening: both span every room, so both are
   // watched for as long as the app is open.
@@ -403,7 +425,7 @@ async function attempt(fn: () => Promise<void>, onFail?: string): Promise<boolea
     return true;
   } catch (err) {
     const mapped = firebaseFailure(err);
-    local.error = mapped === String(err) && onFail ? onFail : mapped;
+    local.error = mapped === String(err) && onFail ? onFail : cleanError(err);
     return false;
   } finally {
     local.busy = false;
@@ -463,13 +485,20 @@ const actions: AppActions = {
   async onJoin(code, displayName) {
     rememberName(displayName);
     local.displayName = displayName;
-    const ok = await attempt(
-      () => backend.joinRoom(code, displayName, local.friend
+    local.busy = true;
+    local.error = null;
+    render();
+    try {
+      await backend.joinRoom(code, displayName, local.friend
         ? { friendId: local.friend.id, friendName: local.friend.displayName }
-        : undefined),
-      t(local.lang, 'join.noSuchRoom'),
-    );
-    if (!ok) return;
+        : undefined);
+    } catch (err) {
+      local.error = joinFailureMessage(err);
+      return;
+    } finally {
+      local.busy = false;
+      render();
+    }
     rememberRoom(code);
     history.replaceState(null, '', roomUrl(location.href, code));
     controller.watch(code);
@@ -689,11 +718,28 @@ async function maybeResumeReferee(): Promise<void> {
   try {
     await runRefereeRound(state.roomId, room.round ^ 0x4f1bbcdc);
   } catch (err) {
-    local.error = String(err);
+    local.error = cleanError(err);
   } finally {
     local.refereeRunning = false;
     render();
   }
+}
+
+/**
+ * The referee browser IS the clock. Phone sleep / tab switch stalls the night
+ * for everyone — say so loudly while it is happening, not only in PLAYTEST.md.
+ */
+function onRefereeVisibility(): void {
+  const state = controller.current();
+  const room = state.room;
+  const isReferee = !!room && room.refereeUid === state.uid;
+  const live = !!room && ['night', 'day', 'voting'].includes(room.phase);
+  const hidden = document.visibilityState === 'hidden';
+  const next = isReferee && live && hidden;
+  if (next === local.refereeBackground) return;
+  local.refereeBackground = next;
+  if (!hidden) render();
+  else render();
 }
 
 /** Return this browser to the start screen without removing it from the room. */
@@ -746,6 +792,21 @@ function render(): void {
   const screen = controller.screen();
   const pendingPrompt = firstPending();
 
+  if (demo) {
+    const banner = document.createElement('p');
+    banner.className = 'join__error';
+    banner.setAttribute('role', 'status');
+    banner.textContent = t(local.lang, 'demo.banner');
+    app.append(banner);
+  }
+  if (local.refereeBackground) {
+    const warn = document.createElement('p');
+    warn.className = 'join__error';
+    warn.setAttribute('role', 'alert');
+    warn.textContent = t(local.lang, 'referee.background');
+    app.append(warn);
+  }
+
   // Creating a room is the one screen that needs a name before it exists, so
   // it gets its own path rather than being squeezed into renderApp's setup.
   if (screen.kind === 'setup') {
@@ -771,11 +832,18 @@ function render(): void {
     if (recent) {
       const reopen = button(t(local.lang, 'home.returnToRoom', { code: recent }), () => {
         local.code = recent;
+        local.error = null;
+        // A new phone is not yet a member: watching alone is not enough.
+        controller.setJoining(true);
         history.replaceState(null, '', roomUrl(location.href, recent));
         controller.watch(recent);
       });
       reopen.classList.add('btn--secondary');
       app.append(reopen);
+      const reopenNote = document.createElement('p');
+      reopenNote.className = 'sheet__sub';
+      reopenNote.textContent = t(local.lang, 'home.returnToRoomNote');
+      app.append(reopenNote);
     }
     app.append(renderResolutionPicker({
       lang: local.lang,

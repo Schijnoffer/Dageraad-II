@@ -225,10 +225,24 @@ describe('lobby seating', () => {
     }));
   });
 
-  it('does not let a member remove or replace an existing seated player', async () => {
+  it('lets a lobby member clear a ghost seat so another phone can sit', async () => {
+    await seed('lobby', 0, 0);
+    await assertSucceeds(updateDoc(doc(as(CHARLIE), 'rooms', ROOM), {
+      seating: [ALICE],
+    }));
+  });
+
+  it('lets a joining member reclaim a seat held by another device', async () => {
+    await seed('lobby', 0, 0);
+    await assertSucceeds(updateDoc(doc(as(CHARLIE), 'rooms', ROOM), {
+      seating: [ALICE, CHARLIE],
+    }));
+  });
+
+  it('still refuses inventing a third party into the seating', async () => {
     await seed('lobby', 0, 0);
     await assertFails(updateDoc(doc(as(CHARLIE), 'rooms', ROOM), {
-      seating: [ALICE, CHARLIE],
+      seating: [ALICE, BOB, 'stranger-uid'],
     }));
   });
 });
