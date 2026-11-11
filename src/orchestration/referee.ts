@@ -147,7 +147,7 @@ export async function runNight(opts: RefereeOptions): Promise<NightRunResult> {
       // bot answering in a microsecond must not make its window shorter, or
       // test mode would stop testing the thing that matters most.
       if (opts.bots?.seats.has(request.seat)) {
-        answers.set(answerKey(request), opts.bots.bot.choose(request, state));
+        answers.set(answerKey(request), await opts.bots.bot.choose(request, state));
         continue;
       }
 

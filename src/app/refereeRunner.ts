@@ -41,6 +41,11 @@ export interface BotSeats {
    * makes that safe. Optional so both can share this shape.
    */
   device?(seat: SeatIndex): Backend;
+  /**
+   * The bot's own ballot. Without it a bot names a random other seat. An AI
+   * player that took part in the discussion decides here instead.
+   */
+  vote?(seat: SeatIndex): Promise<SeatIndex | null>;
 }
 
 export interface RefereeRunnerOptions {
@@ -357,7 +362,16 @@ async function castBotVotes(opts: RefereeRunnerOptions, room: RoomView): Promise
     const targets = room.seating
       .map((_, target) => target as SeatIndex)
       .filter((target) => target !== seat);
-    const targetSeat = targets[Math.floor(random() * targets.length)];
+    let targetSeat = targets[Math.floor(random() * targets.length)];
+    if (bots.vote) {
+      try {
+        const chosen = await bots.vote(seat);
+        if (chosen !== null && targets.includes(chosen)) targetSeat = chosen;
+      } catch {
+        // An AI that cannot decide still has to name somebody; voting is
+        // mandatory and the ballot would otherwise wait forever.
+      }
+    }
     const targetUid = targetSeat === undefined ? null : (room.seating[targetSeat] ?? null);
     const ownUid = room.seating[seat];
     // Defensive: a bot that named itself would be refused by the rules anyway,

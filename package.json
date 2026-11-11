@@ -12,7 +12,10 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "test:rules": "node node_modules/firebase-tools/lib/bin/firebase.js --project dageraad-rules-test emulators:exec --only firestore,auth \"node node_modules/vitest/vitest.mjs run --config vitest.rules.config.ts\"",
-    "verify": "npm test && npm run typecheck && npm run test:rules"
+    "verify": "npm test && npm run typecheck && npm run test:rules",
+    "ai:sim": "vite-node src/ai/cli/sim.ts --",
+    "ai:play": "vite-node src/ai/cli/play.ts --",
+    "ai:host": "vite-node src/ai/cli/host.ts --"
   },
   "dependencies": {
     "firebase": "^12.18.0"
