@@ -15,3 +15,6 @@ tools/_figures/
 
 # tsc -b incremental cache. Machine-local, and it churns on every build.
 *.tsbuildinfo
+
+# AI-player runs (transcripts, logs). Experimental branch only.
+ai-runs/

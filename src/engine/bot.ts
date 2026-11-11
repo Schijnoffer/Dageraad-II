@@ -15,7 +15,8 @@ import type { Choice, DecisionRequest, NightState, SeatIndex } from './types.js'
  */
 
 export interface Bot {
-  choose(request: DecisionRequest, state: NightState): Choice;
+  /** May be async: an LLM player answers after a network round-trip. */
+  choose(request: DecisionRequest, state: NightState): Choice | Promise<Choice>;
   chooseVote(seat: SeatIndex, state: NightState): { target: SeatIndex | null; abstain: boolean };
 }
 
@@ -30,7 +31,11 @@ function rng(seed: number): () => number {
   };
 }
 
-export function randomBot(seed: number): Bot {
+export interface SyncBot extends Bot {
+  choose(request: DecisionRequest, state: NightState): Choice;
+}
+
+export function randomBot(seed: number): SyncBot {
   const next = rng(seed);
   const pick = <T>(items: T[]): T | undefined =>
     items.length === 0 ? undefined : items[Math.floor(next() * items.length)];
